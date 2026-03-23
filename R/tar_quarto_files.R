@@ -63,7 +63,7 @@ tar_quarto_files_document <- function(path, profile, quiet) {
   )
   out <- list()
   # Collect data about source files.
-  out$sources <- tar_quarto_files_get_source_files(info$fileInformation)
+  out$sources <- tar_quarto_files_source(info$fileInformation)
   # Collect data about output files.
   output_dir <- info$project$config$project$`output-dir`
   for (format in info$formats) {
@@ -99,7 +99,7 @@ tar_quarto_files_project <- function(path, profile, quiet) {
   )
   out <- list(output = file.path(path, info$config$project$`output-dir`))
   # Collect data about source files.
-  out$sources <- tar_quarto_files_get_source_files(info$fileInformation)
+  out$sources <- tar_quarto_files_source(info$fileInformation, path)
   # Detect input files like the config file (`_quarto.yml`) and resources like
   # quarto extensions. Make sure in the end that these files exist.
   out$input <- unlist(c(info$files$config, info$files$resources))
@@ -108,18 +108,50 @@ tar_quarto_files_project <- function(path, profile, quiet) {
 }
 
 #' @title Get Source Files From Quarto Inspect
-#' @keywords internal
+#' @noRd
 #' @description Collects all files from the
 #'   `fileInformation` field that are used in the current report.
 #' @details `fileInformation` contains a list of files. Each file entry contains
 #'   two data frames. The first, `includeMap`, contains a `source` column (files
 #'   that include other files, e.g. the main report file) and a `target` column
-#'   (files that get included by the `source` files). The `codeCells` data frame
-#'   contains all code cells from the files represented in `includeMap`.
+#'   (files that get included by the `source` files).
 #' @return A character vector of Quarto source files.
 #' @param file_information The `fileInformation` element of the list
 #'   returned by `quarto::quarto_inspect()`.
-tar_quarto_files_get_source_files <- function(file_information) {
+#' @param path Character string, top-level directory of the Quarto project.
+#'   In case of single reports, `path` should be `NULL`.
+tar_quarto_files_source <- function(file_information, path = NULL) {
+  quarto_version <- as.character(quarto::quarto_version())
+  if (utils::compareVersion(quarto_version, "1.9.0") >= 0L) {
+    tar_quarto_files_source_current(file_information, path)
+  } else {
+    tar_quarto_files_source_old(file_information, path) # nocov
+  }
+}
+
+# for Quarto >= 1.9.0
+tar_quarto_files_source_current <- function(file_information, path = NULL) {
+  out <- character(0)
+  for (source_file in names(file_information)) {
+    # Collect relevant source files. The files in `includeMap$target` are always
+    # relative to the main entry point of the report. Thus, we need to add the
+    # corresponding paths to the entries.
+    # We don't need to include the `source` column as all files are also present
+    # in `target` or are `source_file`.
+    info <- file_information[[source_file]]
+    if (!is.null(path)) {
+      source_file <- file.path(path, source_file)
+    }
+    includes <- file.path(dirname(source_file), info$includeMap$target)
+    out <- c(out, source_file, includes)
+  }
+  # Return only files actually exist.
+  out[file.exists(out)]
+}
+
+# nocov start
+# for Quarto < 1.9.0
+tar_quarto_files_source_old <- function(file_information, path = NULL) {
   out <- character(0)
   for (myfile in names(file_information)) {
     # Collect relevant source files. The files in `includeMap$target` are always
@@ -142,3 +174,4 @@ tar_quarto_files_get_source_files <- function(file_information) {
   # function.
   out
 }
+# nocov end
